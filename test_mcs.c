@@ -10,10 +10,12 @@ typedef struct {
     int num_threads;
     int num_iterations;
     int value;
-    int test_type;
     pthread_barrier_t barrier;
-    mcs_t test_lock1;
-    pthread_mutex_t test_lock2;
+#ifdef MCS
+    mcs_t lock;
+#else
+    pthread_mutex_t lock;
+#endif
 } test_state;
 
 typedef struct {
@@ -69,17 +71,20 @@ pthread_routine(void *const arg)
     pthread_barrier_wait(&st->barrier);
 
     for (int i = 0; i < st->num_iterations; ++i) {
-        if (st->test_type == 2) {
-            pthread_mutex_lock(&st->test_lock2);
-        } else {
-            mcs_acquire(&st->test_lock1, mynode);
+        int const t = xorshift32(&rng_state) & 0xffff;
+        for (volatile int j = 0; j < t; ++j) {
         }
+#ifdef MCS
+        mcs_acquire(&st->lock, mynode);
+#else
+        pthread_mutex_lock(&st->lock);
+#endif
         st->value += 1;
-        if (st->test_type == 2) {
-            pthread_mutex_unlock(&st->test_lock2);
-        } else {
-            mcs_release(&st->test_lock1, mynode);
-        }
+#ifdef MCS
+        mcs_release(&st->lock, mynode);
+#else
+        pthread_mutex_unlock(&st->lock);
+#endif
     }
 
     return NULL;
@@ -88,7 +93,13 @@ pthread_routine(void *const arg)
 int
 main(int argc, char **argv)
 {
-    assert(argc == 4);
+#ifdef MCS
+    //printf("MCS variant\n");
+#else
+    //printf("pthread_mutex variant\n");
+#endif
+
+    //printf("sizeof(mcs_t) = %zu\n", sizeof(mcs_t));
 
     test_state *const st = malloc(sizeof(*st));
     if (st == NULL) {
@@ -96,15 +107,23 @@ main(int argc, char **argv)
         abort();
     }
 
-    st->num_threads = (int)strtol(argv[1], NULL, 10);
-    st->test_type = (int)strtol(argv[2], NULL, 10);
-    st->num_iterations = (int)strtol(argv[3], NULL, 10);
-    printf("starting test with %d threads, test type %d, %d iterations\n", st->num_threads, st->test_type, st->num_iterations);
+    st->num_threads = 1;
+    if (argc > 1) {
+        st->num_threads = (int)strtol(argv[1], NULL, 10);
+    }
+    st->num_iterations = 1000;
+    if (argc > 2) {
+        st->num_iterations = (int)strtol(argv[2], NULL, 10);
+    }
+    //printf("starting test with %d threads, %d iterations\n", st->num_threads, st->num_iterations);
 
     pthread_barrier_init(&st->barrier, NULL, st->num_threads + 1);
-    if (st->test_type == 2) {
-        pthread_mutex_init(&st->test_lock2, NULL);
-    }
+
+#ifdef MCS
+    st->lock = (mcs_t) {};
+#else
+    pthread_mutex_init(&st->lock, NULL);
+#endif
 
     pthread_t *threads = malloc(st->num_threads * sizeof(pthread_t));
     if (threads == NULL) {
@@ -136,10 +155,11 @@ main(int argc, char **argv)
     unsigned long time_diff = (end.tv_sec - start.tv_sec);
     time_diff *= NSEC_PER_SECOND;
     time_diff += (end.tv_nsec - start.tv_nsec);
-    printf("nanosecond difference is %lu\n", time_diff);
+    //printf("nanosecond difference is %lu\n", time_diff);
+    printf("%lu\n", time_diff);
 
-    printf("Incremented value is %d\n", st->value);
-    printf("Expected value is %d\n", st->num_threads * st->num_iterations);
+    //printf("Incremented value is %d\n", st->value);
+    //printf("Expected value is %d\n", st->num_threads * st->num_iterations);
 
     return 0;
 }
