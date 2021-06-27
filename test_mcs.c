@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <assert.h>
 #include <time.h>
@@ -9,13 +11,9 @@
 typedef struct {
     int num_threads;
     int num_iterations;
-    int value;
+    volatile int value;
     pthread_barrier_t barrier;
-#ifdef MCS
     mcs_t lock;
-#else
-    pthread_mutex_t lock;
-#endif
 } test_state;
 
 typedef struct {
@@ -62,29 +60,26 @@ pthread_routine(void *const arg)
         (void)xorshift32(&rng_state);
     }
 
-    mcs_t *const mynode = malloc(sizeof(*mynode));
-    if (mynode == NULL) {
-        fprintf(stderr, "worker thread failed to allocate mcs_node\n");
-        abort();
-    }
-
     pthread_barrier_wait(&st->barrier);
 
+    mcs_t *mydat = malloc(sizeof(*mydat));
+
     for (int i = 0; i < st->num_iterations; ++i) {
-        int const t = xorshift32(&rng_state) & 0xffff;
+        int const t = xorshift32(&rng_state) & 0xff;
         for (volatile int j = 0; j < t; ++j) {
         }
-#ifdef MCS
-        mcs_acquire(&st->lock, mynode);
-#else
-        pthread_mutex_lock(&st->lock);
-#endif
-        st->value += 1;
-#ifdef MCS
-        mcs_release(&st->lock, mynode);
-#else
-        pthread_mutex_unlock(&st->lock);
-#endif
+        mcs_acquire(&st->lock, mydat);
+        ++st->value;
+        --st->value;
+        ++st->value;
+        --st->value;
+        ++st->value;
+        --st->value;
+        ++st->value;
+        --st->value;
+        ++st->value;
+        --st->value;
+        mcs_release(&st->lock, mydat);
     }
 
     return NULL;
@@ -93,14 +88,6 @@ pthread_routine(void *const arg)
 int
 main(int argc, char **argv)
 {
-#ifdef MCS
-    //printf("MCS variant\n");
-#else
-    //printf("pthread_mutex variant\n");
-#endif
-
-    //printf("sizeof(mcs_t) = %zu\n", sizeof(mcs_t));
-
     test_state *const st = malloc(sizeof(*st));
     if (st == NULL) {
         printf("Failed to alloc test state\n");
@@ -119,47 +106,52 @@ main(int argc, char **argv)
 
     pthread_barrier_init(&st->barrier, NULL, st->num_threads + 1);
 
-#ifdef MCS
-    st->lock = (mcs_t) {};
-#else
-    pthread_mutex_init(&st->lock, NULL);
-#endif
+    st->lock = (mcs_t) {
+        .m_next = NULL,
+        .m_locked = 0
+    };
 
     pthread_t *threads = malloc(st->num_threads * sizeof(pthread_t));
     if (threads == NULL) {
         fprintf(stderr, "Failed to allocate threads\n");
         abort();
     }
+
     pthread_arg *pargs = malloc(st->num_threads * sizeof(*pargs));
     if (pargs == NULL) {
         fprintf(stderr, "Failed to allocate args\n");
         abort();
     }
+
     for (int i = 0; i < st->num_threads; ++i) {
         pargs[i].state = st;
         pargs[i].threadnum = i;
     }
 
-    for (int i = 0; i < st->num_threads; ++i) {
-        pthread_create(&threads[i], NULL, pthread_routine, (void *)&pargs[i]);
+    for (;;) {
+
+        for (int i = 0; i < st->num_threads; ++i) {
+            pthread_create(&threads[i], NULL, pthread_routine, (void *)&pargs[i]);
+        }
+
+        pthread_barrier_wait(&st->barrier);
+
+        struct timespec start, end;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        for (int i = 0; i < st->num_threads; ++i) {
+            pthread_join(threads[i], NULL);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        uint64_t time_diff = (end.tv_sec - start.tv_sec);
+        time_diff *= NSEC_PER_SECOND;
+        time_diff += (end.tv_nsec - start.tv_nsec);
+        //printf("nanosecond difference is %lu\n", time_diff);
+        printf("%"PRIu64"\n", time_diff);
+
+        printf("Incremented value is %d\n", st->value);
+        //printf("Expected value is %d\n", st->num_threads * st->num_iterations);
     }
-
-    pthread_barrier_wait(&st->barrier);
-
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    for (int i = 0; i < st->num_threads; ++i) {
-        pthread_join(threads[i], NULL);
-    }
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    unsigned long time_diff = (end.tv_sec - start.tv_sec);
-    time_diff *= NSEC_PER_SECOND;
-    time_diff += (end.tv_nsec - start.tv_nsec);
-    //printf("nanosecond difference is %lu\n", time_diff);
-    printf("%lu\n", time_diff);
-
-    //printf("Incremented value is %d\n", st->value);
-    //printf("Expected value is %d\n", st->num_threads * st->num_iterations);
 
     return 0;
 }
+
