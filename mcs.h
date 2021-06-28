@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdalign.h>
 #include <stdatomic.h>
 
 #if defined(__x86_64__) || defined(__x86__)
@@ -26,7 +27,7 @@ backoff(void) {
 typedef struct mcs_spinlock_node mcs_t;
 
 struct mcs_spinlock_node {
-    mcs_t *_Atomic m_next __attribute__((aligned(256)));
+    alignas(64) mcs_t *_Atomic m_next;
     long _Atomic m_locked;
 };
 
@@ -77,7 +78,9 @@ mcs_release(mcs_t *const p_lock, mcs_t *const p_node)
 {
     mcs_t *l_node = atomic_load_explicit(&p_node->m_next, memory_order_relaxed);
     if (l_node == NULL) {
-        // If we cannot see a waiter, try to atomically release the spinlock
+        // If we cannot see a waiter, try to atomically release the spinlock.
+        // Must use strong instead of weak because a spurious failure could
+        // leave us waiting for another waiter that hasn't arrived.
         l_node = p_node;
         if (atomic_compare_exchange_strong_explicit(&p_lock->m_next, &l_node, NULL, memory_order_release, memory_order_relaxed)) {
             return;

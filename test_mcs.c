@@ -111,6 +111,8 @@ main(int argc, char **argv)
         .m_locked = 0
     };
 
+    printf("sizeof(mcs_t) = %zu\n", sizeof(mcs_t));
+
     pthread_t *threads = malloc(st->num_threads * sizeof(pthread_t));
     if (threads == NULL) {
         fprintf(stderr, "Failed to allocate threads\n");
