@@ -46,10 +46,10 @@ mcs_acquire(mcs_t *const p_lock, mcs_t *const p_node)
     // queue for the lock
 
     // Place our context at the tail of the queue and get the previous tail.
-    // Use seq_cst so that the writes to p_node above aren't ordered after
+    // Use acq_rel so that the writes to p_node above aren't ordered after
     // putting our node in the queue, and prevents future writes from being
     // ordered before we have the lock in the NULL case.
-    mcs_t *const prev_tail = atomic_exchange_explicit(&p_lock->m_next, p_node, memory_order_seq_cst);
+    mcs_t *const prev_tail = atomic_exchange_explicit(&p_lock->m_next, p_node, memory_order_acq_rel);
     if (prev_tail != NULL) {
         // Link our node in so the node ahead of us can unlock us
         atomic_store_explicit(&prev_tail->m_next, p_node, memory_order_relaxed);
