@@ -65,9 +65,9 @@ pthread_routine(void *const arg)
     mcs_t *mydat = malloc(sizeof(*mydat));
 
     for (int i = 0; i < st->num_iterations; ++i) {
-        int const t = xorshift32(&rng_state) & 0xff;
-        for (volatile int j = 0; j < t; ++j) {
-        }
+        //int const t = xorshift32(&rng_state) & 0xff;
+        //for (volatile int j = 0; j < t; ++j) {
+        //}
         mcs_acquire(&st->lock, mydat);
         ++st->value;
         --st->value;
@@ -149,6 +149,7 @@ main(int argc, char **argv)
         time_diff += (end.tv_nsec - start.tv_nsec);
         //printf("nanosecond difference is %lu\n", time_diff);
         printf("%"PRIu64"\n", time_diff);
+        printf("timer per iteration: %f\n", 1.0*time_diff / (st->num_threads * st->num_iterations));
 
         printf("Incremented value is %d\n", st->value);
         //printf("Expected value is %d\n", st->num_threads * st->num_iterations);
