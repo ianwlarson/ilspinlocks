@@ -199,24 +199,39 @@ mcs_release2(mcs_t *const p_lock, mcs_t *const p_node)
     mcs_t *l_node = atomic_load_explicit(&p_node->m_next, memory_order_acquire);
     if (l_node == NULL) {
         // It seems like there was no waiter, try to release the lock.
-        // 1. release - don't reorder writes after we release the lock.
-        mcs_t *const old_tail = atomic_exchange_explicit(&p_lock->m_next, NULL, memory_order_release);
+        //
+        // 1. Must need to use release for the uncontested success case
+        // 2. Must use acquire to create a release -> acquire ordering with
+        // old_tail if it isn't us.
+        //
+        mcs_t *const old_tail = atomic_exchange_explicit(&p_lock->m_next, NULL, memory_order_acq_rel);
         if (old_tail == p_node) {
             // I was really the tail.
             return;
         }
 
-        // Someone else was actually the tail of the lock (they hadn't
-        // installed themselves to our m_next when we checked)
+        // Although our m_next was not set, one or more nodes had been
+        // installed a p_lock->m_next.
         //
-        // In this case we need to take the node after us and add it to the
-        // queue. (e.g. we are trying to acquire the lock on behalf of someone
-        // else)
+        // At this point the lock is fully unlocked and we have a disconnected
+        // queue of one or more nodes starting at our m_next and ending at
+        // old_tail (which can be the same).
+        //
+        // There are 2 possibilities:
+        // 1. We are able to place the tail back and the lock is still
+        // uncontested. In this case, we can simply release the lock to the
+        // next node.
+        // 2. Someone skipped the line, we need to add our next node to the new
+        // end of the queue.
 
-        // Place the old_tail back at the end of the queue.
-        // - relaxed, we don't have any other memory accesses we need to be
-        // ordered
-        mcs_t *const usurper = atomic_exchange_explicit(&p_lock->m_next, old_tail, memory_order_relaxed);
+        //
+        // 1. Must use acquire to ensure that we don't clobber usurper's m_next
+        // (2 threads acquiring case).
+        // 2. Must use release to ensure that any new waiter that comes along
+        // sees the writes to old_tail (the acquire above is for the same
+        // reason).
+        //
+        mcs_t *const usurper = atomic_exchange_explicit(&p_lock->m_next, old_tail, memory_order_acq_rel);
 
         for (;;) {
             // TODO Is it better to do the load with acquire and have no fence?
