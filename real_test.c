@@ -16,18 +16,19 @@ static volatile int *g_value;
 static mcs_t *g_lock;
 
 typedef struct {
-    int num_threads;
-    int num_iterations;
+    long num_threads;
+    long num_iterations;
     pthread_barrier_t barrier;
     pthread_mutex_t m_pmtx;
     uint64_t earliest_cc;
     uint64_t latest_cc;
     atomic_uint interrupt_barrier;
+    uint64_t collision_prevention;
 } test_state;
 
 typedef struct {
     test_state *state;
-    int threadnum;
+    int corenum;
 } pthread_arg;
 
 #define NSEC_PER_SECOND 1000000000u
@@ -57,7 +58,7 @@ pthread_routine(void *const arg)
 
     mcs_t my_node;
 
-    unsigned runmask = 1 << parg->threadnum;
+    unsigned runmask = 1 << parg->corenum;
     status = ThreadCtl(_NTO_TCTL_RUNMASK_GET_AND_SET, &runmask);
 
     // This may fail if you try to use more threads than there are cores
@@ -67,10 +68,13 @@ pthread_routine(void *const arg)
     status = ThreadCtl(_NTO_TCTL_IO_PRIV, 0);
     assert(status == 0);
 
+    uint64_t const collide_prot = st->collision_prevention;
+
     pthread_barrier_wait(&st->barrier);
 
     mcs_t *const l_lock = g_lock;
     int volatile*const l_value = g_value;
+
 
     // When using spinlocks, interrupts aren't recommended
     InterruptDisable();
@@ -83,9 +87,9 @@ pthread_routine(void *const arg)
 
     uint64_t const cc1 = ClockCycles();
     for (int i = 0; i < st->num_iterations; ++i) {
-        //int const t = xorshift32(&rng_state) & 0xff;
-        //for (volatile int j = 0; j < t; ++j) {
-        //}
+        int const t = xorshift32(&rng_state) & collide_prot;
+        for (volatile int j = 0; j < t; ++j) {
+        }
         mcs_acquire(l_lock, &my_node);
         // Alternate adding and subtracting. If two threads get into the
         // critical section simultaneously it should be obvious.
@@ -112,9 +116,49 @@ pthread_routine(void *const arg)
     return NULL;
 }
 
+static uint64_t
+get_overhead(test_state *const st)
+{
+    int status = 0;
+
+    int volatile*const l_value = g_value;
+
+    unsigned rng_state = (time(NULL) ^ getpid()) * gettid();
+    for (int i = 0; i < 1000; ++i) {
+        (void)xorshift32(&rng_state);
+    }
+
+    uint64_t const collide_prot = st->collision_prevention;
+
+    // Ensure we can disable interrupts
+    status = ThreadCtl(_NTO_TCTL_IO_PRIV, 0);
+    assert(status == 0);
+
+    InterruptDisable();
+    uint64_t const cc1 = ClockCycles();
+    for (int i = 0; i < st->num_iterations; ++i) {
+        int const t = xorshift32(&rng_state) & collide_prot;
+        for (volatile int j = 0; j < t; ++j) {
+        }
+        *l_value += 1;
+        *l_value -= 1;
+        *l_value += 1;
+        *l_value -= 1;
+        *l_value += 1;
+        *l_value -= 1;
+    }
+    uint64_t const cc2 = ClockCycles();
+    InterruptEnable();
+
+    return cc2 - cc1;
+}
+
 int
 main(int argc, char **argv)
 {
+    uint64_t const cps = SYSPAGE_ENTRY(qtime)->cycles_per_sec;
+    double const cpusec = 1.0 * cps / 1000000;
+
     int status = 0;
     test_state *const st = malloc(sizeof(*st));
     if (st == NULL) {
@@ -136,16 +180,47 @@ main(int argc, char **argv)
         .m_locked = 0
     };
 
-
     st->num_threads = 1;
-    if (argc > 1) {
-        st->num_threads = (int)strtol(argv[1], NULL, 10);
+    st->num_iterations = 10000;
+
+    bool default_cores[1] = { true };
+    bool *cores = default_cores;
+
+    int c;
+    while ((c = getopt(argc, argv, "c:d:")) != -1) {
+        switch (c) {
+        case 'c': {
+            st->num_threads = 0;
+            long ncores = strlen(optarg);
+            cores = malloc(sizeof(*cores) * ncores);
+            for (int i = 0; i < ncores; ++i) {
+                cores[i] = (optarg[i] != '0');
+                if (cores[i]) {
+                    ++st->num_threads;
+                }
+            }
+            break;
+        }
+        case 'p':
+            long c = strtol(optarg, NULL, 10);
+            st->collision_prevention = (1<<c) - 1;
+            printf("Using collision prevention %"PRIx64"\n", st->collision_prevention);
+        case 'n':
+            st->num_iterations = strtol(optarg, NULL, 10);
+            printf("Using %d iterations\n", st->num_iterations);
+            break;
+        case '?':
+            break;
+        default:
+            printf ("?? getopt returned character code 0%o ??\n", c);
+        }
     }
-    st->num_iterations = 1000;
-    if (argc > 2) {
-        st->num_iterations = (int)strtol(argv[2], NULL, 10);
+    if (optind < argc) {
+        printf ("non-option ARGV-elements: ");
+        while (optind < argc)
+            printf ("%s ", argv[optind++]);
+        printf ("\n");
     }
-    //printf("starting test with %d threads, %d iterations\n", st->num_threads, st->num_iterations);
 
     pthread_barrier_init(&st->barrier, NULL, st->num_threads + 1);
 
@@ -166,12 +241,24 @@ main(int argc, char **argv)
         abort();
     }
 
+    int core_idx = 0;
     for (int i = 0; i < st->num_threads; ++i) {
         pargs[i].state = st;
-        pargs[i].threadnum = i;
+
+        // Find a core that we want to turn on
+        while (!cores[core_idx]) {
+            ++core_idx;
+        }
+
+        pargs[i].corenum = core_idx;
+        printf("Putting a thread on core %d\n", core_idx);
+        ++core_idx;
     }
 
-    uint64_t const cps = SYSPAGE_ENTRY(qtime)->cycles_per_sec;
+    uint64_t const overhead = get_overhead(st);
+    double const cycles_per_iteration  = 1.0 * overhead / st->num_iterations;
+
+    printf("Overhead of %f cycles, (loop time %f usec)\n", cycles_per_iteration, cycles_per_iteration / cpusec);
 
     for (;;) {
 
@@ -192,14 +279,14 @@ main(int argc, char **argv)
         assert(*g_value == 0);
 
         uint64_t const cc_diff = st->latest_cc - st->earliest_cc;
-        double const sec_diff = 1.0 * cc_diff / cps;
+        double const usec_diff = cc_diff / cpusec;
 
-        printf("Time difference was %"PRIu64" clock cycles or %f seconds\n", cc_diff, sec_diff);
+        printf("Time difference was %"PRIu64" clock cycles or %f usec\n", cc_diff, usec_diff);
         uint64_t const num_crit = st->num_threads * st->num_iterations;
         printf("The spinlock was acquired & released a total of %"PRIu64" times\n", num_crit);
 
-        double const nsec_diff = sec_diff * 1000000000.0;
-        printf("The average critical cycle time was %f nanoseconds\n", nsec_diff / num_crit);
+        printf("The average critical cycle time was %f usec\n", usec_diff / num_crit);
+        sleep(1);
     }
 
     return 0;
