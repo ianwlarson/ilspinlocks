@@ -5,10 +5,28 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <string.h>
 #include <assert.h>
 #include <time.h>
 
-static gta_t g_lock;
+#include <sys/mman.h>
+
+static gta_t *g_lock;
+
+static gta_t *
+allocate_gta(size_t const n_lockers)
+{
+    size_t const alloc_size = (n_lockers + 1) * 64;
+    gta_t *p_lock = malloc(alloc_size);
+    memset(p_lock, 0, alloc_size);
+    p_lock->slots = (void *)((unsigned char *)p_lock + 64);
+    p_lock->m_allocsz = alloc_size;
+
+    // Start the lock unlocked!
+    p_lock->m_tail = (uintptr_t)&p_lock->slots[0].v | 0x1;
+
+    return p_lock;
+}
 
 typedef struct {
     int num_threads;
@@ -45,13 +63,15 @@ pthread_routine(void *const arg)
 
     unsigned const my_num = parg->threadnum;
 
+    gta_t *const l_lock = g_lock;
+
     pthread_barrier_wait(&st->barrier);
 
     for (int i = 0; i < st->num_iterations; ++i) {
         //int const t = xorshift32(&rng_state) & 0xff;
         //for (volatile int j = 0; j < t; ++j) {
         //}
-        gta_acquire(&g_lock, my_num);
+        gta_acquire(l_lock, my_num);
         ++st->value;
         --st->value;
         ++st->value;
@@ -62,7 +82,7 @@ pthread_routine(void *const arg)
         --st->value;
         ++st->value;
         --st->value;
-        gta_release(&g_lock, my_num);
+        gta_release(l_lock, my_num);
     }
 
     return NULL;
@@ -89,13 +109,7 @@ main(int argc, char **argv)
 
     pthread_barrier_init(&st->barrier, NULL, st->num_threads + 1);
 
-    size_t const alloc_size = sizeof(*g_lock.slots) * st->num_threads;
-    g_lock.slots = calloc(1, alloc_size);
-
-    // Start the lock unlocked!
-    g_lock.m_tail = (uintptr_t)&g_lock.slots[0].v | 0x1;
-
-    printf("gta spinlock size %zu\n", alloc_size);
+    g_lock = allocate_gta(st->num_threads);
 
     pthread_t *threads = malloc(st->num_threads * sizeof(pthread_t));
     if (threads == NULL) {
