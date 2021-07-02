@@ -35,8 +35,6 @@ struct gta_lock {
     size_t m_allocsz;
 };
 
-#define NSEC_PER_SECOND UINT64_C(1000000000)
-
 static inline void
 gta_acquire(gta_t *const p_lock, unsigned const my_id)
 {
@@ -62,7 +60,7 @@ gta_acquire(gta_t *const p_lock, unsigned const my_id)
 static inline void
 gta_release(gta_t *const p_lock, unsigned const my_id)
 {
-    uintptr_t const lockval = atomic_load_explicit(&p_lock->slots[my_id].v, memory_order_relaxed) & 0x1;
+    uintptr_t const lockval = atomic_load_explicit(&p_lock->slots[my_id].v, memory_order_relaxed);
     atomic_store_explicit(&p_lock->slots[my_id].v, lockval ^ 0x1, memory_order_release);
     sev();
 }

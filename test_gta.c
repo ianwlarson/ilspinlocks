@@ -1,5 +1,3 @@
-#include "gta.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -10,6 +8,10 @@
 #include <time.h>
 
 #include <sys/mman.h>
+
+#include "gta.h"
+
+#define NSEC_PER_SECOND UINT64_C(1000000000)
 
 static gta_t *g_lock;
 
