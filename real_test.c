@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <assert.h>
 #include <time.h>
 
@@ -56,7 +57,7 @@ pthread_routine(void *const arg)
 
     mcs_t my_node;
 
-    unsigned runmask = 1 << st->threadnum;
+    unsigned runmask = 1 << parg->threadnum;
     status = ThreadCtl(_NTO_TCTL_RUNMASK_GET_AND_SET, &runmask);
 
     // This may fail if you try to use more threads than there are cores
@@ -76,7 +77,7 @@ pthread_routine(void *const arg)
 
     // Spin until all threads are running on their cores
     st->interrupt_barrier++;
-    while (st->interrupt_barrier < num_threads) {
+    while (st->interrupt_barrier < st->num_threads) {
         backoff();
     }
 
@@ -184,15 +185,14 @@ main(int argc, char **argv)
 
         pthread_barrier_wait(&st->barrier);
 
-        struct timespec start, end;
         for (int i = 0; i < st->num_threads; ++i) {
             pthread_join(threads[i], NULL);
         }
 
-        assert(st->value == 0);
+        assert(*g_value == 0);
 
         uint64_t const cc_diff = st->latest_cc - st->earliest_cc;
-        double const sec_diff = 1.0 * cc_diff / cycles_per_sec;
+        double const sec_diff = 1.0 * cc_diff / cps;
 
         printf("Time difference was %"PRIu64" clock cycles or %f seconds\n", cc_diff, sec_diff);
         uint64_t const num_crit = st->num_threads * st->num_iterations;

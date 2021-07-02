@@ -4,6 +4,8 @@
 #include <stdalign.h>
 #include <stdatomic.h>
 
+#include "backoff.h"
+
 /*
  * Common memory ordering explanations
  *
@@ -77,26 +79,6 @@
  * location of synchronization is p_lock->m_next.
  *
  */
-
-#if defined(__x86_64__) || defined(__x86__)
-__attribute__((always_inline))
-static inline void
-backoff(void) {
-    asm volatile("pause");
-}
-#elif defined(__arm__) || defined(__aarch64__)
-__attribute__((always_inline))
-static inline void
-backoff(void) {
-    asm volatile("yield");
-}
-#else
-__attribute__((always_inline))
-static inline void
-backoff(void) {
-    ;
-}
-#endif
 
 typedef struct mcs_spinlock_node mcs_t;
 
