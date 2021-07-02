@@ -28,3 +28,21 @@ the false-uncontended release case is expensive. Once the number of threads
 contending for the lock in a dead spin goes over 3, the MCS lock performance
 reaches a steady state where adding more contenders does not negatively affect
 lock performance.
+
+
+Graunke and Thakkar's Array-Based Queue Lock
+============================================
+
+Annotated version of the GTA Spinlock using C11 standard atomics.
+
+This lock is fantastic.
+
+It has the following disadvantages:
+
+1. The lock has a larger constant cost.
+2. You must know how many contenders for the lock there will be and
+   pre-allocate the lock.
+3. Each contender for the lock must have a fixed ID.
+
+In any circumstance where these aren't a major concern, this lock is fantastic.
+It's incredibly simple and efficient.

@@ -12,17 +12,6 @@ static inline void
 backoff(void) {
     asm volatile("yield");
 }
-
-__attribute__((always_inline))
-static inline void
-sev(void) {
-    asm volatile("sev");
-}
-__attribute__((always_inline))
-static inline void
-wfe(void) {
-    asm volatile("wfe");
-}
 #else
 __attribute__((always_inline))
 static inline void
