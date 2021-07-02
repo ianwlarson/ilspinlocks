@@ -25,7 +25,7 @@ allocate_gta(size_t const n_lockers)
     p_lock->m_allocsz = alloc_size;
 
     // Start the lock unlocked!
-    p_lock->m_tail = (uintptr_t)&p_lock->slots[0].v | 0x1;
+    gta_reset(p_lock);
 
     return p_lock;
 }
