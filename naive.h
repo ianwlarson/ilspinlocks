@@ -13,7 +13,7 @@ acquire(atomic_uint *const lock)
     for (;;) {
         bool const acquired = atomic_compare_exchange_weak_explicit(lock, &v, 1, memory_order_acquire, memory_order_relaxed);
         if (acquired) break;
-        backoff(); // pause/yield
+        wfe();
     }
 }
 
@@ -21,5 +21,6 @@ static inline void
 release(atomic_uint *const lock)
 {
     atomic_store_explicit(lock, 0, memory_order_release);
+    sev();
 }
 

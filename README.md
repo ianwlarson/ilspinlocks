@@ -35,7 +35,7 @@ Graunke and Thakkar's Array-Based Queue Lock
 
 Annotated version of the GTA Spinlock using C11 standard atomics.
 
-This lock is fantastic.
+This lock is fantastic. It's scalable and fair.
 
 It has the following disadvantages:
 
@@ -46,3 +46,16 @@ It has the following disadvantages:
 
 In any circumstance where these aren't a major concern, this lock is fantastic.
 It's incredibly simple and efficient.
+
+NOTE
+====
+
+Usages of wfe and sev assume that you're running either on bare metal or with
+interrupts disabled. If you're running on an operating system (don't do this)
+you want to use the version where wfe is replaced by a pause/yield.
+
+
+Also, scalable locks are scalable in that they don't suffer a large performance
+penalty when there is high contention. That being said, a system with high
+contention of resources by definition doesn't scale. Spinlocks should only be
+used under very rare circumstances.
