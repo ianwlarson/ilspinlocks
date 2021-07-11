@@ -11,6 +11,20 @@ A naïve spinlock needs to do
 It is unfair (order of arrival has no effect) and it does not scale (as the
 number of spinning cores increases there is an eventual performance collapse).
 
+Ticket Lock
+===========
+
+Basic ticket spinlock.
+
+It's 2 counters.
+To lock it, the waiter takes a number and then waits until the other number
+matches its number.
+To release the lock, increment the `now_serving` value.
+
+It probably scales linearly with the number of threads
+attempting to acquire it, and also probably has a point at which there is a
+performance collapse.
+
 MCS Lock
 ========
 
