@@ -24,12 +24,11 @@ ticket_acq(tick_t *const p_lock)
         if (diff == 0) {
             break;
         } else {
-#if defined(__arm__) || defined(__aarch64__)
-            wfe();
-#else
             for (unsigned i = 0; i < diff; ++i) {
                 backoff();
             }
+#if defined(__arm__) || defined(__aarch64__)
+            wfe();
 #endif
         }
     }
