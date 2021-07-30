@@ -22,7 +22,7 @@ struct simple_ticket_spinlock {
             atomic_uint next_ticket;
         };
 #endif
-        atomic_uint_fast64_t total;
+        _Atomic uint64_t total;
     };
 };
 
@@ -64,11 +64,22 @@ ticket_tryacq(tick_t *const p_lock)
     unsigned const next_ticket = atomic_load_explicit(&p_lock->next_ticket, memory_order_relaxed);
 
     // Assume that the lock is unlocked (the next_ticket and now_serving match)
-    uint64_t const l_exp = ((uint64_t)next_ticket << 32) | (uint64_t)next_ticket;
+    uint64_t l_exp = ((uint64_t)next_ticket << 32) | (uint64_t)next_ticket;
 
     // try to write in 1. p_lock is a union so that this will do:
     // next_ticket = 1
     // now_serving = 0
     // atomically.
+    // NOTE: The fields must be reversed on a big endian system.
     return atomic_compare_exchange_weak_explicit(&p_lock->total, &l_exp, 1, memory_order_acquire, memory_order_relaxed);
 }
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+_Static_assert(offsetof(struct simple_ticket_spinlock, next_ticket) == 0, "e");
+_Static_assert(offsetof(struct simple_ticket_spinlock, now_serving) == 4, "e");
+_Static_assert(offsetof(struct simple_ticket_spinlock, total) == 0, "e");
+#else
+_Static_assert(offsetof(struct simple_ticket_spinlock, next_ticket) == 4, "e");
+_Static_assert(offsetof(struct simple_ticket_spinlock, now_serving) == 0, "e");
+_Static_assert(offsetof(struct simple_ticket_spinlock, total) == 0, "e");
+#endif
