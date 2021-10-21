@@ -2,10 +2,10 @@
 Naïve Spinlock
 ==============
 
-We often refer to a naïve spinlock for comparison purposes.
+It's useful to have a naïve spinlock for comparison purposes.
 
 A naïve spinlock needs to do
-1. Acquire using a Compare-and-Swap
+1. Acquire using an Atomic-Fetch-Or
 2. Release using a store
 
 It is unfair (order of arrival has no effect) and it does not scale (as the
